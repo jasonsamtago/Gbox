@@ -26,6 +26,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:yaml/yaml.dart';
 
 import 'common/common.dart';
+import 'common/archive.dart' show restoreBackupFiles;
 import 'common/flclash_database_extractor.dart';
 import 'models/models.dart';
 import 'views/profiles/override_profile.dart';
@@ -2009,12 +2010,7 @@ class AppController {
     );
 
     // Restore profile files to disk
-    for (final profile in profiles) {
-      final filePath = join(homeDirPath, profile.name);
-      final file = File(filePath);
-      await file.create(recursive: true);
-      await file.writeAsBytes(profile.content);
-    }
+    await restoreBackupFiles(profiles, homeDirPath);
 
     // Apply recovery logic
     _recovery(tempConfig, recoveryOption);
@@ -2054,12 +2050,7 @@ class AppController {
     );
 
     // Restore profile files to disk
-    for (final profile in profileFiles) {
-      final filePath = join(homeDirPath, profile.name);
-      final file = File(filePath);
-      await file.create(recursive: true);
-      await file.writeAsBytes(profile.content);
-    }
+    await restoreBackupFiles(profileFiles, homeDirPath);
 
     // Extract profiles from backup
     List<Profile> profiles = [];
