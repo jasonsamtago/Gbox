@@ -32,3 +32,13 @@ The connection wrapper preserves SDK deadlines, half-close, chain metadata and a
 The JSON sidecar records source observations, tags, SDK commit/tree/archive hash and template hash. Dirty observations do not identify all dirty bytes exactly. The executable is never launched. Failed compilation or recording removes owned partial outputs; temporary SDK extraction is cleaned up. Keep the sidecar with the artifact.
 
 Evidence is limited to source review, offline compilation, Go vet and Dart static/compiler checks. Protocol, application, connection, concurrency, installation and production behavior have not been executed or established.
+
+## Source and validation record
+
+| Component | Source identity | Evidence scope |
+|---|---|---|
+| Gbox SingLink adapter and compiler entry | `03e7da8cee9afd02e37ce3f94fdc5011429603f3` | Public integration glue; development executable only |
+| Complete focused static-analysis targets | `f93ad10757a0840f903bb2dd43098b1ef14917aa` | Explicit parser and outbound vet targets; earlier adapter-only vet was incomplete |
+| Private shared SDK | `03ebf55baef1681ceef25bea9b839177d1c55e28` | Exact git archive selected by sdk.json; not a released protocol version |
+
+Recorded on 2026-09-10: offline darwin/arm64 opt-in compilation and both-package vet passed with Go1.26.3 and cached Go1.20.14. The ordinary core build and both-package vet passed with Go1.26.3. Dart format, analysis and compiler checks passed. No automated tests or generated executables were run. These records do not establish working connections, a shipped client, production deployment or an upstream release number.
