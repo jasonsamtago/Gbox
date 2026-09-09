@@ -10,7 +10,10 @@ Desktop builds overwrite the platform's core when you switch architecture. The
 sidecar's `build.architecture` field records the architecture of the current
 binary.
 
-The record describes the core immediately after compilation and before signing.
+The record describes the core immediately after `go build` and before later
+packaging or release signing. On macOS, the Go linker may already apply an ad
+hoc/linker signature at this point; `core-before-signing` means before the later
+signing stage, not necessarily that the file has no signature at all.
 It contains the artifact size and SHA-256, build options, the client version,
 the wrapper and vendored core module names, and source observations taken before
 and after `go build`.
@@ -46,9 +49,10 @@ Calculate SHA-256 for the core binary and compare it with
 shasum -a 256 libclash/macos/BettboxCore
 ```
 
-The sidecar describes the unsigned, pre-signing bytes. Signing changes the
-binary and therefore its SHA-256. Copying a binary without its sidecar, or
-altering it during signing or packaging, breaks this direct comparison.
+The sidecar describes the bytes immediately after `go build`, before later
+packaging or release signing. Later signing can change the binary and therefore
+its SHA-256. Copying a binary without its sidecar, or altering it during signing
+or packaging, breaks this direct comparison.
 
 The sidecar is a local build record, not a signed attestation. Desktop packaging
 does not automatically copy or publish it. Android native-library staging
