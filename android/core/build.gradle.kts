@@ -53,6 +53,7 @@ val copyNativeLibs by tasks.register<Copy>("copyNativeLibs") {
         delete("src/main/jniLibs")
     }
     from("../../libclash/android")
+    exclude("**/*.build.json")
     into("src/main/jniLibs")
 }
 
