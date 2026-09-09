@@ -167,6 +167,21 @@ func ParseProxy(mapping map[string]any, options ...ProxyOption) (C.Proxy, error)
 			break
 		}
 		proxy, err = outbound.NewMieru(*mieruOption)
+	case "singlink":
+		option := &outbound.SingLinkOption{BasicOption: basicOption}
+		if decoder.Decode(mapping, option) != nil {
+			return nil, fmt.Errorf("invalid SingLink options")
+		}
+		if muxMapping, ok := mapping["smux"].(map[string]any); ok {
+			muxOption := &outbound.SingMuxOption{}
+			if decoder.Decode(muxMapping, muxOption) != nil {
+				return nil, fmt.Errorf("invalid SingLink smux options")
+			}
+			if muxOption.Enabled {
+				return nil, fmt.Errorf("SingLink does not support outer smux")
+			}
+		}
+		proxy, err = outbound.NewSingLink(*option)
 	case "anytls":
 		anytlsOption := &outbound.AnyTLSOption{BasicOption: basicOption}
 		err = decoder.Decode(mapping, anytlsOption)
