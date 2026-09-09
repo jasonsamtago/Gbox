@@ -112,21 +112,33 @@ class BuildProvenance {
       };
     }
 
-    final status = await _runGit(root, [
+    final statusOutput = await _runGit(root, [
       'status',
       '--porcelain=v1',
       '--untracked-files=normal',
     ]);
+    final head = await _runGit(root, ['rev-parse', '--verify', 'HEAD']);
+    final headTree = await _runGit(root, [
+      'rev-parse',
+      '--verify',
+      'HEAD^{tree}',
+    ]);
+    final vendoredCoreTree = await _runGit(root, [
+      'rev-parse',
+      '--verify',
+      'HEAD:core/Clash.Meta',
+    ]);
+    final available =
+        statusOutput != null &&
+        head != null &&
+        headTree != null &&
+        vendoredCoreTree != null;
     return <String, Object?>{
-      'status': 'available',
-      'head': await _runGit(root, ['rev-parse', '--verify', 'HEAD']),
-      'headTree': await _runGit(root, ['rev-parse', '--verify', 'HEAD^{tree}']),
-      'vendoredCoreTree': await _runGit(root, [
-        'rev-parse',
-        '--verify',
-        'HEAD:core/Clash.Meta',
-      ]),
-      'dirty': status?.isNotEmpty,
+      'status': available ? 'available' : 'unavailable',
+      'head': head,
+      'headTree': headTree,
+      'vendoredCoreTree': vendoredCoreTree,
+      'dirty': statusOutput?.isNotEmpty,
     };
   }
 
