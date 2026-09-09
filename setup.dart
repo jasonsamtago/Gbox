@@ -7,6 +7,8 @@ import 'package:args/command_runner.dart';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart';
 
+import 'tool/build_provenance.dart';
+
 enum Target { windows, linux, android, macos }
 
 extension TargetExt on Target {
@@ -233,6 +235,9 @@ class Build {
         workingDirectory: _coreDir,
       );
 
+      await BuildProvenance.removeSidecar(outPath);
+      final startObservation = await BuildProvenance.observe(current);
+
       final execLines = [
         'go',
         'build',
@@ -248,6 +253,17 @@ class Build {
         name: 'build core',
         environment: env,
         workingDirectory: _coreDir,
+      );
+      await BuildProvenance.write(
+        repositoryRoot: current,
+        artifactPath: outPath,
+        targetPlatform: item.target.name,
+        architecture: item.arch?.name ?? 'unknown',
+        mode: mode.name,
+        dev: isDev,
+        compatible: compatible,
+        tags: buildTags.split(','),
+        startObservation: startObservation,
       );
     }
 
