@@ -1,0 +1,157 @@
+//go:build singlink
+
+// Public integration glue only. The SDK is supplied by the pinned external
+// developer workspace, never copied into the public Gbox repository.
+package outbound
+
+import (
+	"context"
+	"crypto/tls"
+	"encoding/hex"
+	"errors"
+	"net"
+	"reflect"
+	"runtime"
+	"time"
+
+	"github.com/jasonsamtago/singlink-go/mux"
+	"github.com/jasonsamtago/singlink-go/session"
+	"github.com/jasonsamtago/singlink-go/target"
+	"github.com/jasonsamtago/singlink-go/tcpclient"
+	N "github.com/metacubex/mihomo/common/net"
+	C "github.com/metacubex/mihomo/constant"
+)
+
+var errSingLinkOption = errors.New("invalid SingLink options")
+var errSingLinkConnect = errors.New("SingLink protected connection failed")
+
+type SingLink struct {
+	*Base
+	client      *tcpclient.Client
+	dialerProxy string
+}
+
+var _ ProxyAdapter = (*SingLink)(nil)
+
+func NewSingLink(option SingLinkOption) (*SingLink, error) {
+	if option.Name == "" || option.Port < 1 || option.Port > 65535 || option.UDP || option.SkipCertVerify || (option.Transport != "" && option.Transport != "direct-tls") {
+		return nil, errSingLinkOption
+	}
+	server := target.Endpoint{Network: "tcp", Host: option.Server, Port: uint16(option.Port)}
+	if _, err := target.Encode(server); err != nil {
+		return nil, errSingLinkOption
+	}
+	if option.SNI == "" {
+		option.SNI = option.Server
+	}
+	if _, err := target.Encode(target.Endpoint{Network: "tcp", Host: option.SNI, Port: 443}); err != nil {
+		return nil, errSingLinkOption
+	}
+	if len(option.Token) != 64 {
+		return nil, errSingLinkOption
+	}
+	var token [32]byte
+	if _, err := hex.Decode(token[:], []byte(option.Token)); err != nil || token == ([32]byte{}) {
+		return nil, errSingLinkOption
+	}
+	if option.MaxPending == 0 {
+		option.MaxPending = 64
+	}
+	if option.MaxStreams == 0 {
+		option.MaxStreams = 128
+	}
+	if option.ReceiveWindow == 0 {
+		option.ReceiveWindow = 262144
+	}
+	if option.SetupTimeout == 0 {
+		option.SetupTimeout = 10000
+	}
+	if option.OpenTimeout == 0 {
+		option.OpenTimeout = 10000
+	}
+	if option.WriteTimeout == 0 {
+		option.WriteTimeout = 10000
+	}
+	if option.MaxPending < 1 || option.MaxPending > 1024 || option.MaxStreams < 1 || option.MaxStreams > 1024 || option.ReceiveWindow < 1 || option.ReceiveWindow > 1048576 || uint64(option.MaxStreams)*uint64(option.ReceiveWindow) > 67108864 {
+		return nil, errSingLinkOption
+	}
+	for _, ms := range []int{option.SetupTimeout, option.OpenTimeout, option.WriteTimeout} {
+		if ms < 1 || ms > 600000 {
+			return nil, errSingLinkOption
+		}
+	}
+	// All options are validated before constructing Base or its configured dialer.
+	t := &SingLink{Base: NewBase(BaseOption{Name: option.Name, Addr: server.Address(), Type: C.SingLink, ProviderName: option.ProviderName, TFO: option.TFO, MPTCP: option.MPTCP, Interface: option.Interface, RoutingMark: option.RoutingMark, Prefer: option.IPVersion}), dialerProxy: option.DialerProxy}
+	t.dialer = option.NewDialer(t.DialOptions())
+	configuredDialer := t.dialer
+	tlsConfig := &tls.Config{ServerName: option.SNI, MinVersion: tls.VersionTLS13}
+	client, err := tcpclient.New(tcpclient.Config{
+		Factory: func(ctx context.Context) (net.Conn, error) {
+			raw, err := configuredDialer.DialContext(ctx, "tcp", server.Address())
+			if err != nil {
+				if !singLinkNil(raw) {
+					_ = raw.Close()
+				}
+				return nil, errSingLinkConnect
+			}
+			// session.Client owns raw on every return and retains generation ctx on
+			// success. Never defer-cancel this reusable lifetime at factory return.
+			return session.Client(ctx, raw, tlsConfig, token)
+		},
+		MaxPending: option.MaxPending, SetupTimeout: time.Duration(option.SetupTimeout) * time.Millisecond, OpenTimeout: time.Duration(option.OpenTimeout) * time.Millisecond,
+		Mux: mux.Config{Role: mux.Client, MaxStreams: option.MaxStreams, ReceiveWindow: uint32(option.ReceiveWindow), HandshakeTimeout: time.Duration(option.SetupTimeout) * time.Millisecond, WriteTimeout: time.Duration(option.WriteTimeout) * time.Millisecond},
+	})
+	if err != nil {
+		return nil, errSingLinkOption
+	}
+	t.client = client
+	return t, nil
+}
+func singLinkNil(raw net.Conn) bool {
+	if raw == nil {
+		return true
+	}
+	v := reflect.ValueOf(raw)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return v.IsNil()
+	}
+	return false
+}
+func (t *SingLink) DialContext(ctx context.Context, metadata *C.Metadata) (C.Conn, error) {
+	if metadata == nil || metadata.NetWork != C.TCP {
+		return nil, errors.New("SingLink requires a TCP destination")
+	}
+	destination := target.Endpoint{Network: "tcp", Host: metadata.String(), Port: metadata.DstPort}
+	if _, err := target.Encode(destination); err != nil {
+		return nil, err
+	}
+	stream, err := t.client.DialContext(ctx, destination)
+	if err != nil {
+		return nil, err
+	}
+	cc := &conn{ExtendedConn: N.NewExtendedConn(stream), adapterAddr: t.Addr()}
+	cc.AppendToChains(t)
+	return &singLinkConn{conn: cc, stream: stream}, nil
+}
+func (t *SingLink) ProxyInfo() C.ProxyInfo {
+	info := t.Base.ProxyInfo()
+	info.DialerProxy = t.dialerProxy
+	return info
+}
+func (t *SingLink) Close() error { err := t.client.Close(); <-t.client.Done(); return err }
+
+// Keep native stream deadlines. No NewConn/deadline wrapper or extra read worker.
+// Inherited AddRef retains auto-close adapters; KeepAlive covers the explicit
+// CloseWrite path that bypasses ExtendedConn's optional method set.
+type singLinkConn struct {
+	*conn
+	stream *mux.Stream
+}
+
+func (c *singLinkConn) CloseWrite() error       { defer runtime.KeepAlive(c); return c.stream.CloseWrite() }
+func (c *singLinkConn) ReaderReplaceable() bool { return false }
+func (c *singLinkConn) WriterReplaceable() bool { return false }
+
+var _ C.Conn = (*singLinkConn)(nil)
+var _ AddRef = (*singLinkConn)(nil)

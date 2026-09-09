@@ -11,6 +11,8 @@ const _dependencyPaths = <String>[
   'core/Clash.Meta/go.mod',
   'core/Clash.Meta/go.sum',
   'pubspec.lock',
+  'tool/singlink/sdk.json',
+  'tool/singlink/outbound.go.in',
 ];
 
 class BuildProvenance {
@@ -43,6 +45,7 @@ class BuildProvenance {
     required bool compatible,
     required List<String> tags,
     required Map<String, Object?> startObservation,
+    Map<String, Object?>? integration,
   }) async {
     final sidecar = File(sidecarPath(artifactPath));
     final temporary = File('${sidecar.path}.tmp');
@@ -85,6 +88,10 @@ class BuildProvenance {
           },
         },
       };
+
+      if (integration != null) {
+        manifest['integration'] = integration;
+      }
 
       await temporary.writeAsString(
         '${const JsonEncoder.withIndent('  ').convert(manifest)}\n',
@@ -144,11 +151,12 @@ class BuildProvenance {
 
   static Future<String?> _runGit(String root, List<String> arguments) async {
     try {
-      final result = await Process.run('git', [
-        '-C',
-        root,
-        ...arguments,
-      ], runInShell: false);
+      final result = await Process.run(
+        'git',
+        ['-C', root, ...arguments],
+        environment: {'GIT_NO_REPLACE_OBJECTS': '1'},
+        runInShell: false,
+      );
       if (result.exitCode != 0) return null;
       return result.stdout.toString().trim();
     } on ProcessException {
