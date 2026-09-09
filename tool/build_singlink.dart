@@ -289,6 +289,7 @@ Future<void> _build(List<String> args) async {
           '-overlay=$overlay',
           '-tags=${_tags.join(',')}',
           'github.com/metacubex/mihomo/adapter',
+          'github.com/metacubex/mihomo/adapter/outbound',
         ],
         cwd: p.join(root, 'core'),
         environment: environment,
